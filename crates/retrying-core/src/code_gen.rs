@@ -73,6 +73,18 @@ pub(crate) fn add_retry_code_into_function(
         quote!()
     };
 
+    let asyncness_block = if asyncness.is_some() {
+        quote!(async)
+    } else {
+        quote!()
+    };
+
+    let await_block = if asyncness.is_some() {
+        quote!(.await)
+    } else {
+        quote!()
+    };
+
     let retry_err_check = retry.map_or(quote!(), prepare_retry);
 
     quote!(
@@ -85,7 +97,7 @@ pub(crate) fn add_retry_code_into_function(
         #let_retrying_wait
 
         loop {
-            match #block {
+            match (#asyncness_block || #return_type #block)() #await_block {
                 Ok(result) => return Ok(result),
                 Err(err) if #retrying_stop_check => {
                     #retry_err_check
@@ -396,7 +408,7 @@ mod tests {
             ) ; \
             use :: retrying :: wait :: Wait ; \
             let retrying_wait = :: retrying :: wait :: WaitFixed :: new (:: retrying :: override_by_env :: < f32 > (0.5f32 , \"TEST\" , :: retrying :: envs :: RETRYING_WAIT_FIXED)) ; \
-            loop { match { in_param . parse :: < i32 > () } { \
+            loop { match (|| -> Result < i32 , ParseIntError > { in_param . parse :: < i32 > () }) () { \
                 Ok (result) => return Ok (result) , \
                 Err (err) if ! retrying_stop . stop_execution (& retrying_context) => { \
                     match err { \
@@ -409,6 +421,7 @@ mod tests {
                 Err (err) => break Err (err) \
             } \
         } }";
+
         assert_eq!(result.to_string(), expected);
     }
 
@@ -432,7 +445,7 @@ mod tests {
         let expected = "\
         fn test_function < > (in_param : & str) -> Result < i32 , ParseIntError > { \
             let mut retrying_context = :: retrying :: RetryingContext :: new () ; \
-            loop { match { in_param . parse :: < i32 > () } { \
+            loop { match (|| -> Result < i32 , ParseIntError > { in_param . parse :: < i32 > () }) () { \
                 Ok (result) => return Ok (result) , \
                 Err (err) if true => { \
                     retrying_context . add_attempt () ; \
